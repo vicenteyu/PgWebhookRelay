@@ -34,7 +34,8 @@ public class PostgresNotificationService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("正在初始化 Postgres 到 Convoy 转发服务...");
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("正在初始化 Postgres 到 Convoy {webhook} 转发服务...", _options.ConvoyWebhookUrl);
 
         var dbListenerTask = ListenPostgresLoopAsync(stoppingToken);
         var webhookSenderTask = ProcessAndSendWebhookLoopAsync(stoppingToken);
@@ -65,7 +66,9 @@ public class PostgresNotificationService : BackgroundService
 
             try
             {
-                _logger.LogInformation("正在尝试与 Postgres 数据库建立连接...");
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("正在尝试与 Postgres {host} 数据库建立连接...", connStringBuilder.Host);
+
                 connection = new NpgsqlConnection(connStringBuilder.ConnectionString);
                 await connection.OpenAsync(ctsForLoop.Token).ConfigureAwait(false);
 
