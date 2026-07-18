@@ -5,9 +5,7 @@ using PgWebhookRelay;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 var builder = Host.CreateApplicationBuilder(args);
-//builder.Configuration.AddJsonFile("appsettings.json");
 
-// 绑定环境变量
 builder.Services.Configure<RelayOptions>(options =>
 {
     options.DbConnectionString = builder.Configuration["DB_CONNECTION_STRING"]
@@ -24,13 +22,11 @@ builder.Services.Configure<RelayOptions>(options =>
     }
 });
 
-// 注册标准 HttpClient 工厂，内部自动管理连接池，防止高并发下 TCP 端口耗尽
 builder.Services.AddHttpClient("ConvoyClient", client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(10); // 严格控制超时时间
+    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
-// 注册常驻服务
 builder.Services.AddHostedService<PostgresNotificationService>();
 
 var host = builder.Build();
