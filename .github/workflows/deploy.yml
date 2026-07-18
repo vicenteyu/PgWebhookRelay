@@ -60,6 +60,7 @@ jobs:
   # ==========================================
   build-docker:
     name: Build and Push Docker Image
+    needs: build-binaries
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,6 +68,15 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Download Linux Artifact for Docker
+      uses: actions/download-artifact@v4
+      with:
+        name: pg-webhook-relay-linux
+        path: ./publish
+
+    - name: Rename artifact for Docker
+      run: mv ./publish/pg-webhook-relay ./publish/pg-webhook-relay-linux
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
