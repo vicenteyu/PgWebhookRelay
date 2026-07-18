@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/runtime-deps:10.0-jammy-chiseled
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-jammy-chiseled
 
 WORKDIR /app
 
