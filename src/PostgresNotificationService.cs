@@ -44,14 +44,13 @@ public class PostgresNotificationService : BackgroundService
     }
 
     /// <summary>
-    /// 轨道一：死磕 Postgres 监听（包含细粒度状态、主动心跳监控及重连）
+    /// Postgres 监听
     /// </summary>
     private async Task ListenPostgresLoopAsync(CancellationToken stoppingToken)
     {
         var retryDelay = TimeSpan.FromSeconds(1);
         const int maxRetryDelaySeconds = 30;
 
-        // 基础 KeepAlive 设为 15 秒，但依赖底层 TCP 往往不可靠，后续配合应用层心跳
         var connStringBuilder = new NpgsqlConnectionStringBuilder(_options.DbConnectionString)
         {
             KeepAlive = 15,
@@ -86,7 +85,6 @@ public class PostgresNotificationService : BackgroundService
 
                 while (!ctsForLoop.IsCancellationRequested)
                 {
-                    // 挂起等待物理连接抛出通知。如果心跳由于假死超时失败，ctsForLoop 会取消，这里会被打断。
                     await connection.WaitAsync(ctsForLoop.Token).ConfigureAwait(false);
                 }
             }
@@ -130,14 +128,14 @@ public class PostgresNotificationService : BackgroundService
     }
 
     /// <summary>
-    /// 轨道二：高可靠 HTTP 转发泵
+    /// 高可靠 HTTP 转发泵
     /// </summary>
     private async Task ProcessAndSendWebhookLoopAsync(CancellationToken stoppingToken)
     {
         await foreach (var message in _memoryChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
         {
             var retryCount = 0;
-            const int maxHttpRetries = 3;
+            const int maxHttpRetries = 10;
             bool success = false;
 
             _logger.LogInformation("从缓冲区提取消息，开始组织转发至 Convoy Endpoint...");
