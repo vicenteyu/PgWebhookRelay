@@ -2,7 +2,11 @@
 using Microsoft.Extensions.Hosting;
 using PgWebhookRelay;
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 var builder = Host.CreateApplicationBuilder(args);
+//builder.Configuration.AddJsonFile("appsettings.json");
+
 // 绑定环境变量
 builder.Services.Configure<RelayOptions>(options =>
 {

@@ -34,13 +34,13 @@ public class PostgresNotificationService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Postgres 到 Convoy 转发服务已启动。目标通道: {Channel}", _options.PgChannelName);
+        _logger.LogInformation("正在初始化 Postgres 到 Convoy 转发服务...");
 
         var dbListenerTask = ListenPostgresLoopAsync(stoppingToken);
         var webhookSenderTask = ProcessAndSendWebhookLoopAsync(stoppingToken);
 
-        await Task.WhenAny(dbListenerTask, webhookSenderTask).ConfigureAwait(false);
+        var firstCompletedTask = await Task.WhenAny(dbListenerTask, webhookSenderTask).ConfigureAwait(false);
+        await firstCompletedTask;
     }
 
     /// <summary>
@@ -80,11 +80,9 @@ public class PostgresNotificationService : BackgroundService
                     await command.ExecuteNonQueryAsync(ctsForLoop.Token).ConfigureAwait(false);
                 }
 
-                _logger.LogInformation("【状态：就绪】成功进入监听状态，正在等待数据库事件通知...");
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("✅ 【服务正式就绪】成功连接数据库并订阅通道: {Channel}，正在监听事件...", _options.PgChannelName);
                 retryDelay = TimeSpan.FromSeconds(1);
-
-                // 启动异步应用层心跳泵，专门在这个连接上定时“敲门”，一旦心跳失败则取消内部 token 触发断线重连
-                _ = StartConnectionHeartbeatAsync(connection, ctsForLoop);
 
                 while (!ctsForLoop.IsCancellationRequested)
                 {
@@ -114,45 +112,6 @@ public class PostgresNotificationService : BackgroundService
                     connection.Notification -= OnNotificationReceived;
                     await connection.DisposeAsync().ConfigureAwait(false);
                 }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 应用层心跳泵：周期性对数据库发起简短查询，主动检测并打破连接假死。
-    /// </summary>
-    private async Task StartConnectionHeartbeatAsync(NpgsqlConnection connection, CancellationTokenSource loopCts)
-    {
-        // 设定每 30 秒执行一次主动保活/假死检测
-        var heartbeatInterval = TimeSpan.FromSeconds(30);
-
-        while (!loopCts.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(heartbeatInterval, loopCts.Token).ConfigureAwait(false);
-
-                if (connection.State != System.Data.ConnectionState.Open)
-                {
-                    _logger.LogWarning("心跳检测：发现底层连接状态非 Open（当前状态: {State}），准备强行触发断线重连。", connection.State);
-                    loopCts.Cancel();
-                    break;
-                }
-
-                // 创建带强时效限制的心跳探测命令，防止探测本身无限挂起
-                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(loopCts.Token, timeoutCts.Token);
-
-                using var keepAliveCmd = new NpgsqlCommand("SELECT 1;", connection);
-                await keepAliveCmd.ExecuteScalarAsync(linkedCts.Token).ConfigureAwait(false);
-
-                _logger.LogDebug("心跳检测：链路存活确认成功 (SELECT 1).");
-            }
-            catch (Exception ex) when (!loopCts.IsCancellationRequested)
-            {
-                _logger.LogError(ex, "【假死捕获】应用层存活心跳（SELECT 1）执行失败或响应超时！判定该连接已陷入死锁/假死。正在阻断当前链路以逼迫服务自动重连。");
-                loopCts.Cancel(); // 宣告此轮连接寿终正寝，打破底层 WaitAsync 的假死等待
-                break;
             }
         }
     }
