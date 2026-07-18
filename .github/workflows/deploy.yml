@@ -1,0 +1,129 @@
+name: Build, Release and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*.*.*' ]
+
+env:
+  IMAGE_NAME: vicenteyu105/pg-webhook-relay
+  PROJECT_PATH: src/PgWebhookRelay.csproj
+
+jobs:
+  # ==========================================
+  # 任务一：跨平台本地单文件编译发布
+  # ==========================================
+  build-binaries:
+    name: Build Native AOT Binaries
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            output_name: pg-webhook-relay-linux
+          - os: windows-latest
+            rid: win-x64
+            output_name: pg-webhook-relay-win.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 安装 .NET 10.0 环境
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    # Linux 环境下需要手动安装 clang 和 zlib 工具链以支持 Native AOT 编译[cite: 1]
+    - name: Install Linux Build Tools
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang zlib1g-dev
+
+    # 执行发布：利用各系统原生链接器，编译出真正的免运行时的底层机器码
+    - name: Dotnet Publish (Native AOT)
+      run: |
+        dotnet publish ${{ env.PROJECT_PATH }} -c Release -r ${{ matrix.rid }} -o ./publish /p:PublishAot=true
+
+    # 将生成的单文件改名并临时上传到 GitHub Action 工件库中
+    - name: Upload Binary Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.output_name }}
+        path: ./publish/${{ matrix.os == 'windows-latest' && 'pg-webhook-relay.exe' || 'pg-webhook-relay' }}
+
+  # ==========================================
+  # 任务二：构建 Docker 镜像并推送（维持原样）
+  # ==========================================
+  build-docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        tags: ${{ id.meta.outputs.tags }}
+        labels: ${{ id.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # ==========================================
+  # 任务三：自动创建 GitHub Release（仅在打 Tag 时触发）
+  # ==========================================
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') # 只有打类似 v1.0.0 的版本标签才触发正式发布
+    
+    steps:
+    - name: Download Linux Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: pg-webhook-relay-linux
+        path: ./release
+
+    - name: Download Windows Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: pg-webhook-relay-win.exe
+        path: ./release
+
+    # 重新命名以便文件更具识别度
+    - name: Rename Files
+      run: |
+        mv ./release/pg-webhook-relay ./release/pg-webhook-relay-linux
+        mv ./release/pg-webhook-relay.exe ./release/pg-webhook-relay-win.exe
+
+    # 自动把二进制文件挂载到 GitHub Release 页面供所有人下载
+    - name: Create Release and Upload Assets
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ./release/pg-webhook-relay-linux
+          ./release/pg-webhook-relay-win.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 无需配置，GitHub 自动注入的令牌

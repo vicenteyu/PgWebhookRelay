@@ -1,0 +1,33 @@
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using PgWebhookRelay;
+
+var builder = Host.CreateApplicationBuilder(args);
+// 绑定环境变量
+builder.Services.Configure<RelayOptions>(options =>
+{
+    options.DbConnectionString = builder.Configuration["DB_CONNECTION_STRING"]
+        ?? throw new NullReferenceException("DB_CONNECTION_STRING");
+    options.PgChannelName = builder.Configuration["PG_CHANNEL_NAME"]
+        ?? throw new NullReferenceException("PG_CHANNEL_NAME");
+    options.ConvoyWebhookUrl = builder.Configuration["CONVOY_WEBHOOK_URL"]
+        ?? throw new NullReferenceException("CONVOY_WEBHOOK_URL");
+    options.ConvoySecret = builder.Configuration["CONVOY_SECRET"];
+
+    if (int.TryParse(builder.Configuration["MAX_CAPACITY"], out var maxCap))
+    {
+        options.MaxCapacity = maxCap;
+    }
+});
+
+// 注册标准 HttpClient 工厂，内部自动管理连接池，防止高并发下 TCP 端口耗尽
+builder.Services.AddHttpClient("ConvoyClient", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10); // 严格控制超时时间
+});
+
+// 注册常驻服务
+builder.Services.AddHostedService<PostgresNotificationService>();
+
+var host = builder.Build();
+await host.RunAsync();

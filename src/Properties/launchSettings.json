@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PgWebhookRelay": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
